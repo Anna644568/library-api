@@ -1,6 +1,6 @@
 """REST API «Библиотека» на FastAPI + SQLite.
 
-4 сущности × 5 операций (create, list, get, update, delete) = 20 CRUD-эндпоинтов.
+5 сущностей × 5 операций (create, list, get, update, delete) = 25 CRUD-эндпоинтов.
 Запуск:  uvicorn app.main:app --reload   → документация на http://127.0.0.1:8000/docs
 """
 from typing import Type
@@ -76,6 +76,7 @@ ENTITIES = [
     ("/genres", "genres", "Жанры", schemas.GenreIn, schemas.GenreUpdate, schemas.Genre),
     ("/books", "books", "Книги", schemas.BookIn, schemas.BookUpdate, schemas.Book),
     ("/readers", "readers", "Читатели", schemas.ReaderIn, schemas.ReaderUpdate, schemas.Reader),
+    ("/loans", "loans", "Выдачи", schemas.LoanIn, schemas.LoanUpdate, schemas.Loan),
 ]
 
 
