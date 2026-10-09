@@ -3,7 +3,7 @@ from app.main import ENTITIES
 
 
 def test_health(client):
-    assert client.get("/health").json() == {"status": "fail"}
+    assert client.get("/health").json() == {"status": "ok"}
 
 
 def test_openapi_crud_operations_count(client):
