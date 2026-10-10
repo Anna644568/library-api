@@ -41,3 +41,5 @@ python -m pytest -v
 Pipeline описан в `Jenkinsfile`: Checkout → Setup → Test → Package → Deliver
 (последние два этапа — только для `main`).
 Demo: CI push to dev branch.
+
+Demo 2: 10.10.2026 10:22:41,75
