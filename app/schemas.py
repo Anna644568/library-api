@@ -5,24 +5,27 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
-# ---------- Авторы ----------
+# Авторы 
 class AuthorIn(BaseModel):
     full_name: str = Field(min_length=1, max_length=200)
     country: Optional[str] = None
+    city: Optional[str] = None
     birth_year: Optional[int] = Field(default=None, ge=0, le=2100)
 
 
 class AuthorUpdate(BaseModel):
     full_name: Optional[str] = Field(default=None, min_length=1, max_length=200)
     country: Optional[str] = None
+    city: Optional[str] = None
     birth_year: Optional[int] = Field(default=None, ge=0, le=2100)
 
 
 class Author(AuthorIn):
     id: int
+    
 
 
-# ---------- Жанры ----------
+#  Жанры
 class GenreIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: Optional[str] = None
