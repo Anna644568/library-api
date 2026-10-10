@@ -84,7 +84,7 @@ pipeline {
             echo "Сборка ${env.BRANCH_NAME} #${env.BUILD_NUMBER} прошла успешно"
         }
         failure {
-            echo "Сборка ${env.BRANCH_NAME} #${env.BUILD_NUMBER} упала — смотрите отчёт тестов"
+            echo "Сборка ${env.BRANCH_NAME} #${env.BUILD_NUMBER} упала — смотреть отчёт тестов"
         }
         cleanup {
             cleanWs()

@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS authors (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     full_name   TEXT    NOT NULL,
     country     TEXT,
+    city TEXT,
     birth_year  INTEGER
 );
 
