@@ -1,7 +1,7 @@
 """Тесты CRUD для авторов и жанров."""
 
 
-# ---------- Авторы ----------
+#  Авторы 
 def test_create_author(client):
     r = client.post("/authors", json={"full_name": "Антон Чехов", "birth_year": 1860})
     assert r.status_code == 201
