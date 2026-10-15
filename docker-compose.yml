@@ -1,0 +1,48 @@
+# Описание микросервисного приложения «Библиотека» для Docker Compose.
+#
+#   браузер ──► web (nginx, порт ${WEB_PORT}) ──► api (FastAPI, порт 8000) ──► том library-data (SQLite)
+#                  └────────── сеть backend ──────────┘
+#
+# Запуск вручную:     docker compose up -d --build          → http://localhost:8081
+# Jenkins запускает два окружения из этого же файла:
+#   staging    (ветка dev):  docker compose -p library-staging ...  → http://localhost:8082
+#   production (ветка main): docker compose -p library-prod    ...  → http://localhost:8081
+
+services:
+  api:
+    image: library-api:${IMAGE_TAG:-local}
+    build:
+      context: .
+      target: runtime
+    environment:
+      LIBRARY_DB: /data/library.db
+      ROOT_PATH: /api
+      APP_ENV: ${APP_ENV:-local}
+      APP_BUILD: ${APP_BUILD:-local}
+      APP_COMMIT: ${APP_COMMIT:-local}
+    volumes:
+      - library-data:/data        # база данных переживает пересоздание контейнера
+    networks:
+      - backend
+    # порты наружу НЕ открываются: api доступен только из сети backend (через nginx)
+    restart: unless-stopped
+
+  web:
+    image: library-web:${IMAGE_TAG:-local}
+    build:
+      context: ./web
+    ports:
+      - "${WEB_PORT:-8081}:80"    # порт_компьютера:порт_контейнера
+    depends_on:
+      api:
+        condition: service_healthy   # nginx стартует, когда api прошёл healthcheck
+    networks:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  library-data:
+
+networks:
+  backend:
+    driver: bridge
