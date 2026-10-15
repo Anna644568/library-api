@@ -62,8 +62,10 @@ pipeline {
 
         stage('Build test image') {
             steps {
-                // этап test из Dockerfile: код приложения + pytest + тесты
-                bat 'docker build --target test -t library-api-test:%IMAGE_TAG% .'
+                // этап test из Dockerfile: код приложения + pytest + тесты;
+                // --load: готовый образ обязательно загружается в Docker (нужно, если
+                // сборщик BuildKit работает в отдельном контейнере)
+                bat 'docker build --load --target test -t library-api-test:%IMAGE_TAG% .'
             }
         }
 
