@@ -21,9 +21,13 @@ pipeline {
 
     environment {
         DOCKER_BUILDKIT = '1'
-        // Docker Desktop установлен в профиль пользователя — на всякий случай
-        // добавляем папку с docker.exe в начало PATH
+        // Docker Desktop установлен в профиль пользователя User, а служба Jenkins работает
+        // от системной учётной записи и не видит его настроек. Поэтому:
+        //  - добавляем папку с docker.exe в начало PATH;
+        //  - указываем отдельную папку настроек Docker для Jenkins (там config.json
+        //    с путём к плагинам docker compose и docker buildx)
         PATH = "C:\\Users\\User\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin;${env.PATH}"
+        DOCKER_CONFIG = 'C:\\ProgramData\\Jenkins\\docker-config'
     }
 
     stages {
