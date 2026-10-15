@@ -21,6 +21,9 @@ pipeline {
 
     environment {
         DOCKER_BUILDKIT = '1'
+        // Docker Desktop установлен в профиль пользователя — на всякий случай
+        // добавляем папку с docker.exe в начало PATH
+        PATH = "C:\\Users\\User\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin;${env.PATH}"
     }
 
     stages {
