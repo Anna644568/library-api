@@ -1,14 +1,15 @@
-// Декларативный pipeline для проекта «Библиотека API» (FastAPI + SQLite).
-// Jenkins работает на Windows, поэтому шаги выполняются через bat.
+// Декларативный pipeline для проекта «Библиотека» (ЛР2: контейнеризация).
+// Jenkins работает на Windows, шаги выполняются через bat, Docker — Docker Desktop.
 //
-// CI  — ветки dev и feature/*: установка зависимостей и автотесты.
-// CD  — ветка main: то же самое + упаковка и доставка сборки в папку развёртывания.
+// Все ветки (CI):   сборка тестового образа -> автотесты в контейнере -> сборка образов api и web
+// dev  (staging):    + развёртывание контейнеров на http://localhost:8082 и smoke-тест
+// main (production): + развёртывание контейнеров на http://localhost:8081 и smoke-тест
 
 pipeline {
     agent any
 
     triggers {
-        // запуск по событию push из GitHub (через webhook)
+        // запуск по событию push из GitHub (вебхук)
         githubPush()
     }
 
@@ -19,59 +20,85 @@ pipeline {
     }
 
     environment {
-        PYTHON     = 'C:\\Users\\User\\miniconda3\\python.exe'
-        VENV       = '.venv'
-        DEPLOY_DIR = 'C:\\deploy\\library-api'
-        PYTHONIOENCODING = 'utf-8'
+        DOCKER_BUILDKIT = '1'
     }
 
     stages {
         stage('Checkout') {
             steps {
                 checkout scm
-                bat 'git log -1 --pretty=format:"%%h %%an: %%s"'
+                script {
+                    env.SHORT_COMMIT = bat(returnStdout: true, script: '@git rev-parse --short HEAD').trim()
+                    // тег образов: <ветка>-<номер сборки>, например main-5, feature-docker-2
+                    env.IMAGE_TAG  = "${env.BRANCH_NAME.replace('/', '-')}-${env.BUILD_NUMBER}"
+                    env.APP_BUILD  = env.BUILD_NUMBER
+                    env.APP_COMMIT = env.SHORT_COMMIT
+                    // в какое окружение разворачивать
+                    if (env.BRANCH_NAME == 'main') {
+                        env.APP_ENV = 'production'; env.STACK = 'library-prod';    env.WEB_PORT = '8081'
+                    } else if (env.BRANCH_NAME == 'dev') {
+                        env.APP_ENV = 'staging';    env.STACK = 'library-staging'; env.WEB_PORT = '8082'
+                    } else {
+                        env.APP_ENV = 'none'
+                    }
+                }
+                echo "Ветка ${env.BRANCH_NAME}, коммит ${env.SHORT_COMMIT}, тег образов ${env.IMAGE_TAG}, окружение ${env.APP_ENV}"
             }
         }
 
-        stage('Setup') {
+        stage('Docker info') {
             steps {
+                bat 'docker version'
+                bat 'docker compose version'
+            }
+        }
+
+        stage('Build test image') {
+            steps {
+                // этап test из Dockerfile: код приложения + pytest + тесты
+                bat 'docker build --target test -t library-api-test:%IMAGE_TAG% .'
+            }
+        }
+
+        stage('Unit tests') {
+            steps {
+                // тесты выполняются ВНУТРИ контейнера; отчёт junit.xml копируется из контейнера в workspace
                 bat '''
-                    "%PYTHON%" -m venv %VENV% || exit /b 1
-                    %VENV%\\Scripts\\python.exe -m pip install --upgrade pip || exit /b 1
-                    %VENV%\\Scripts\\python.exe -m pip install -r requirements.txt || exit /b 1
+                    docker rm -f lib-test-%IMAGE_TAG% >nul 2>&1
+                    docker run --name lib-test-%IMAGE_TAG% library-api-test:%IMAGE_TAG%
+                    set RC=%ERRORLEVEL%
+                    if not exist reports mkdir reports
+                    docker cp lib-test-%IMAGE_TAG%:/app/reports/junit.xml reports\\junit.xml
+                    docker rm lib-test-%IMAGE_TAG% >nul
+                    exit /b %RC%
                 '''
             }
         }
 
-        stage('Test') {
+        stage('Build images') {
             steps {
-                bat '%VENV%\\Scripts\\python.exe -m pytest -v --junitxml=reports\\junit.xml'
+                // образы library-api:<тег> и library-web:<тег> по описанию из docker-compose.yml
+                bat 'docker compose build'
+                bat 'docker image ls --filter "reference=library-*"'
             }
         }
 
-        stage('Package') {
-            when { branch 'main' }
+        stage('Deploy') {
+            when { anyOf { branch 'main'; branch 'dev' } }
             steps {
-                powershell '''
-                    New-Item -ItemType Directory -Force -Path dist | Out-Null
-                    Compress-Archive -Force -Path app, requirements.txt, README.md `
-                        -DestinationPath "dist\\library-api-$env:BUILD_NUMBER.zip"
-                '''
-                archiveArtifacts artifacts: 'dist/*.zip', fingerprint: true
+                // пересоздаются только контейнеры, том library-data с базой сохраняется
+                bat 'docker compose -p %STACK% up -d --no-build --remove-orphans --wait --wait-timeout 120'
+                bat 'docker compose -p %STACK% ps'
             }
         }
 
-        stage('Deliver') {
-            when { branch 'main' }
+        stage('Smoke test') {
+            when { anyOf { branch 'main'; branch 'dev' } }
             steps {
-                powershell '''
-                    New-Item -ItemType Directory -Force -Path $env:DEPLOY_DIR | Out-Null
-                    Expand-Archive -Force -Path "dist\\library-api-$env:BUILD_NUMBER.zip" `
-                        -DestinationPath $env:DEPLOY_DIR
-                    Set-Content -Path "$env:DEPLOY_DIR\\VERSION.txt" `
-                        -Value "build $env:BUILD_NUMBER, commit $env:GIT_COMMIT, $(Get-Date)"
-                    Write-Host "Сборка $env:BUILD_NUMBER доставлена в $env:DEPLOY_DIR"
-                '''
+                // 1) изнутри Docker-сети: тестовый контейнер -> nginx -> api -> БД
+                bat 'docker run --rm --network %STACK%_backend library-api-test:%IMAGE_TAG% python e2e/smoke.py http://web'
+                // 2) снаружи, как пользователь: через опубликованный порт
+                bat 'curl -fsS http://localhost:%WEB_PORT%/api/info'
             }
         }
     }
@@ -79,12 +106,21 @@ pipeline {
     post {
         always {
             junit allowEmptyResults: true, testResults: 'reports/junit.xml'
+            // тестовый образ больше не нужен; удаляем и «висячие» слои старых сборок
+            bat(returnStatus: true, script: 'docker image rm library-api-test:%IMAGE_TAG% >nul 2>&1')
+            bat(returnStatus: true, script: 'docker image prune -f')
         }
         success {
-            echo "Сборка ${env.BRANCH_NAME} #${env.BUILD_NUMBER} прошла успешно"
+            script {
+                if (env.APP_ENV != 'none') {
+                    echo "Сборка ${env.BRANCH_NAME} #${env.BUILD_NUMBER} развёрнута (${env.APP_ENV}): http://localhost:${env.WEB_PORT}"
+                } else {
+                    echo "Сборка ${env.BRANCH_NAME} #${env.BUILD_NUMBER}: тесты пройдены, образы собраны"
+                }
+            }
         }
         failure {
-            echo "Сборка ${env.BRANCH_NAME} #${env.BUILD_NUMBER} упала — смотреть отчёт тестов"
+            echo "Сборка ${env.BRANCH_NAME} #${env.BUILD_NUMBER} упала — смотреть журнал этапа и отчёт тестов"
         }
         cleanup {
             cleanWs()
