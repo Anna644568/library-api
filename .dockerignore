@@ -1,0 +1,15 @@
+# что НЕ отправлять в Docker при сборке образа
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+reports
+dist
+*.db
+.idea
+.vscode
+web
+Jenkinsfile
+docker-compose.yml
