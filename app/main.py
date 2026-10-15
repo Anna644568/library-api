@@ -1,8 +1,10 @@
 """REST API «Библиотека» на FastAPI + SQLite.
 
 5 сущностей × 5 операций (create, list, get, update, delete) = 25 CRUD-эндпоинтов.
-Запуск:  uvicorn app.main:app --reload   → документация на http://127.0.0.1:8000/docs
+Запуск без Docker:  uvicorn app.main:app --reload  → http://127.0.0.1:8000/docs
+Запуск в Docker:    docker compose up -d           → http://localhost:8081
 """
+import os
 from typing import Type
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Response, status
@@ -71,6 +73,9 @@ def crud_router(
     return router
 
 
+APP_VERSION = "2.0.0"
+SERVICE_PATHS = {"/health", "/info"}
+
 ENTITIES = [
     ("/authors", "authors", "Авторы", schemas.AuthorIn, schemas.AuthorUpdate, schemas.Author),
     ("/genres", "genres", "Жанры", schemas.GenreIn, schemas.GenreUpdate, schemas.Genre),
@@ -81,8 +86,10 @@ ENTITIES = [
 
 
 def create_app(db_path: str = DB_PATH) -> FastAPI:
-    app = FastAPI(title="Библиотека API", version="1.0.0",
-                  description="Учебный проект для лабораторной работы по CI/CD (Jenkins)")
+    # ROOT_PATH=/api задаётся в контейнере: снаружи API доступно через nginx по адресу /api/...
+    app = FastAPI(title="Библиотека API", version=APP_VERSION,
+                  description="Учебный проект для лабораторных работ по CI/CD (Jenkins, Docker)",
+                  root_path=os.getenv("ROOT_PATH", ""))
     app.state.db = connect(db_path)
     init_db(app.state.db)
 
@@ -92,6 +99,17 @@ def create_app(db_path: str = DB_PATH) -> FastAPI:
     @app.get("/health", tags=["Служебное"], summary="Проверка работоспособности")
     def health():
         return {"status": "ok"}
+
+    @app.get("/info", tags=["Служебное"], summary="Версия и окружение развёрнутой сборки")
+    def info():
+        # значения передаёт Jenkins при развёртывании контейнера (docker-compose.yml)
+        return {
+            "app": "Библиотека API",
+            "version": APP_VERSION,
+            "environment": os.getenv("APP_ENV", "local"),
+            "build": os.getenv("APP_BUILD", "local"),
+            "commit": os.getenv("APP_COMMIT", "local"),
+        }
 
     return app
 
