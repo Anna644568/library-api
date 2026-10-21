@@ -93,12 +93,12 @@ pipeline {
         }
         stage('Push to Docker Hub') {
             steps {
-                // 1. Переименовываем локальные образы под твой аккаунт Docker Hub
+                // 1. Переименовываем локальные образы под аккаунт Docker Hub
                 bat "docker tag library-api:%IMAGE_TAG% anna234567890/library-api:%IMAGE_TAG%"
                 bat "docker tag library-web:%IMAGE_TAG% anna234567890/library-web:%IMAGE_TAG%"
                 
                 // 2. Логинимся и пушим (Jenkins берёт логин/токен из Credentials)
-                withDockerRegistry([credentialsId: 'docker-hub-credentials', url: ""]) {
+                withDockerRegistry(registry: [credentialsId: 'docker-hub-credentials'], toolName: 'docker')  {
                     bat "docker push anna234567890/library-api:%IMAGE_TAG%"
                     bat "docker push anna234567890/library-web:%IMAGE_TAG%"
                 }
