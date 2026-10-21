@@ -96,12 +96,9 @@ pipeline {
                 bat "docker tag library-api:%IMAGE_TAG% anna234567890/library-api:%IMAGE_TAG%"
                 bat "docker tag library-web:%IMAGE_TAG% anna234567890/library-web:%IMAGE_TAG%"
                 
-                // Явно задаём PATH для плагина, как делали для bat
-                withEnv(["PATH+EXTRA=C:\\Users\\User\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin"]) {
-                    withDockerRegistry([credentialsId: 'docker-hub-credentials', url: ""]) {
-                        bat "docker push anna234567890/library-api:%IMAGE_TAG%"
-                        bat "docker push anna234567890/library-web:%IMAGE_TAG%"
-                    }
+                withDockerRegistry(registry: [credentialsId: 'docker-hub-credentials'], toolName: 'docker') {
+                    bat "docker push anna234567890/library-api:%IMAGE_TAG%"
+                    bat "docker push anna234567890/library-web:%IMAGE_TAG%"
                 }
             }
         }
