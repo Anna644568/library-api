@@ -1,7 +1,7 @@
 # Docker-образ сервиса api («Библиотека API», FastAPI + SQLite).
 # Многоэтапная сборка: общий слой base -> образ для тестов (test) и рабочий образ (runtime).
 
-# ---------- base: Python и зависимости приложения ----------
+#base: Python и зависимости приложения 
 FROM python:3.11-slim AS base
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -14,7 +14,7 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 COPY app ./app
 
-# ---------- test: + pytest и тесты; Jenkins запускает его на этапе Unit tests ----------
+# test: + pytest и тесты; Jenkins запускает его на этапе Unit tests ----------
 FROM base AS test
 COPY requirements-dev.txt pytest.ini ./
 RUN pip install -r requirements-dev.txt
