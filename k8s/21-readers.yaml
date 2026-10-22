@@ -1,0 +1,66 @@
+# Микросервис readers — читатели
+# Deployment поддерживает нужное число реплик (подов); Service даёт им одно имя и балансирует запросы.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: readers
+  namespace: library
+  labels: { app: readers, tier: backend, app.kubernetes.io/part-of: library }
+spec:
+  replicas: 2                       # две реплики: при отказе одной сервис продолжает работать
+  revisionHistoryLimit: 5           # хранить 5 прошлых версий для отката (kubectl rollout undo)
+  selector:
+    matchLabels: { app: readers }
+  strategy:
+    type: RollingUpdate             # обновление без простоя: поды заменяются по одному
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  template:
+    metadata:
+      labels: { app: readers, tier: backend, app.kubernetes.io/part-of: library }
+    spec:
+      containers:
+        - name: readers
+          image: anna234567890/library-readers:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef: { name: library-config }
+          env:
+            - name: DB_USER
+              valueFrom: { secretKeyRef: { name: postgres-secret, key: POSTGRES_USER } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: postgres-secret, key: POSTGRES_PASSWORD } }
+            - name: DATABASE_URL
+              value: "postgresql://$(DB_USER):$(DB_PASSWORD)@postgres:5432/readers"
+          # readiness: принимать трафик, только когда есть связь с базой данных
+          readinessProbe:
+            httpGet: { path: /ready, port: 8000 }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            failureThreshold: 2
+          # liveness: если процесс завис или упал — kubelet перезапустит контейнер
+          livenessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: readers
+  namespace: library
+  labels: { app: readers }
+spec:
+  type: ClusterIP                   # доступен только внутри кластера
+  selector: { app: readers }
+  ports:
+    - port: 8000
+      targetPort: 8000
