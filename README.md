@@ -66,5 +66,21 @@ python e2e/smoke.py http://localhost:8081             :: smoke-тест разв
 
 ## CI/CD (Jenkinsfile)
 
-Checkout → Docker info → Build test image → Unit tests → Build images → Deploy → Smoke test
-(Deploy и Smoke test — только для `main` и `dev`).
+Checkout → Docker info → Build test image → Unit tests → Build images → Deploy → Smoke test → Push to Docker Hub
+(Deploy, Smoke test и Push to Docker Hub — только для `main` и `dev`).
+
+## Docker Hub
+
+Проверенные образы Jenkins отправляет в Docker Hub:
+
+- `<логин>/library-api`, `<логин>/library-web` с тегами `dev-<сборка>`, `main-<сборка>` и `latest` (последний релиз из `main`).
+
+Логин и токен доступа хранятся в Jenkins: *Настроить Jenkins → Credentials → (global) → Add Credentials*,
+тип *Username with password*, ID `docker-hub-credentials`.
+
+Запуск опубликованной версии на любом компьютере с Docker:
+
+```bat
+docker pull <логин>/library-api:latest
+docker pull <логин>/library-web:latest
+```
