@@ -1,0 +1,24 @@
+# Общие настройки сервисов (ConfigMap) и пароль базы данных (Secret)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: library-config
+  namespace: library
+data:
+  APP_ENV: "production"
+  ROOT_PATH: "/api"              # снаружи сервисы доступны через nginx с префиксом /api
+  CHAOS_ENABLED: "true"          # эндпоинт /svc/<сервис>/chaos/crash для демонстрации самовосстановления
+  CATALOG_URL: "http://catalog:8000"
+  READERS_URL: "http://readers:8000"
+  APP_BUILD: "local"             # Jenkins подставляет номер сборки
+  APP_COMMIT: "local"            # и коммит при развёртывании
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-secret
+  namespace: library
+type: Opaque
+stringData:
+  POSTGRES_USER: "library"
+  POSTGRES_PASSWORD: "library-lab3-pass"   # учебный пароль; в реальной системе — из хранилища секретов

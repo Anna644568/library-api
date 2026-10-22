@@ -12,10 +12,15 @@
       <span class="logo" aria-hidden="true">▤</span>
       <div>
         <h1>Библиотека</h1>
-        <p class="sub">Веб-интерфейс к REST API · nginx → api → SQLite</p>
+        <p class="sub">Микросервисы в Kubernetes · nginx → catalog / readers / loans → PostgreSQL</p>
       </div>
     </div>
-    <a class="docs" href="/api/docs" target="_blank" rel="noopener">Swagger API ↗</a>
+    <nav class="docs-links" aria-label="Документация API">
+      <span>Swagger:</span>
+      <a class="docs" href="/api/svc/catalog/docs" target="_blank" rel="noopener">catalog ↗</a>
+      <a class="docs" href="/api/svc/readers/docs" target="_blank" rel="noopener">readers ↗</a>
+      <a class="docs" href="/api/svc/loans/docs" target="_blank" rel="noopener">loans ↗</a>
+    </nav>
   </header>
 
   <nav class="tabs" id="tabs" role="tablist"></nav>
@@ -49,7 +54,14 @@
     <div id="status" class="status idle">Запросов ещё не было</div>
   </section>
 
-  <footer class="foot" id="foot">Загрузка информации о сборке…</footer>
+  <footer class="foot">
+    <div class="foot-row" id="foot">Загрузка информации о сборке…</div>
+    <div class="foot-row pods">
+      <span>Ответили поды:</span>
+      <span id="pods">—</span>
+      <button type="button" class="small" id="pods-refresh" title="Ещё раз опросить сервисы">⟳ опросить ещё раз</button>
+    </div>
+  </footer>
 
   <script src="app.js"></script>
 </body>

@@ -1,0 +1,7 @@
+# Отдельное пространство имён для всех объектов приложения «Библиотека»
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: library
+  labels:
+    app.kubernetes.io/part-of: library

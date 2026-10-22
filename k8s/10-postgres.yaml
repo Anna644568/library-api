@@ -1,0 +1,78 @@
+# PostgreSQL: одна база данных на каждый микросервис (catalog, readers, loans)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: library
+data:
+  01-databases.sql: |
+    -- выполняется один раз при первом запуске PostgreSQL
+    CREATE DATABASE catalog;
+    CREATE DATABASE readers;
+    CREATE DATABASE loans;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: library
+  labels: { app: postgres }
+spec:
+  selector: { app: postgres }
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: library
+  labels: { app: postgres, app.kubernetes.io/part-of: library }
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres, app.kubernetes.io/part-of: library }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - secretRef: { name: postgres-secret }
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "library"] }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec: { command: ["pg_isready", "-U", "library"] }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 384Mi }
+      volumes:
+        - name: init
+          configMap: { name: postgres-init }
+  # постоянный том: данные переживают перезапуск и пересоздание пода
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

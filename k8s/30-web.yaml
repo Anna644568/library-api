@@ -1,0 +1,50 @@
+# Веб-сервер nginx: веб-интерфейс и шлюз к микросервисам. Единственный сервис, доступный снаружи.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: library
+  labels: { app: web, tier: frontend, app.kubernetes.io/part-of: library }
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels: { app: web }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  template:
+    metadata:
+      labels: { app: web, tier: frontend, app.kubernetes.io/part-of: library }
+    spec:
+      containers:
+        - name: web
+          image: anna234567890/library-web:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet: { path: /nginx-health, port: 80 }
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /nginx-health, port: 80 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 20m, memory: 16Mi }
+            limits:   { cpu: 200m, memory: 64Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: library
+  labels: { app: web }
+spec:
+  type: NodePort                    # порт 30080 на ноде → в Docker Desktop: http://localhost:30080
+  selector: { app: web }
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 30080
