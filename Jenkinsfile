@@ -2,8 +2,10 @@
 // Jenkins работает на Windows, шаги выполняются через bat, Docker — Docker Desktop.
 //
 // Все ветки (CI):   сборка тестового образа -> автотесты в контейнере -> сборка образов api и web
-// dev  (staging):    + развёртывание контейнеров на http://localhost:8082 и smoke-тест
-// main (production): + развёртывание контейнеров на http://localhost:8081 и smoke-тест
+// dev  (staging):    + развёртывание контейнеров на http://localhost:8082, smoke-тест,
+//                      отправка образов на Docker Hub с тегом dev-<номер сборки>
+// main (production): + развёртывание контейнеров на http://localhost:8081, smoke-тест,
+//                      отправка образов на Docker Hub с тегами main-<номер сборки> и latest
 
 pipeline {
     agent any
@@ -108,6 +110,43 @@ pipeline {
                 bat 'docker run --rm --network %STACK%_backend library-api-test:%IMAGE_TAG% python e2e/smoke.py http://web'
                 // 2) снаружи, как пользователь: через опубликованный порт
                 bat 'curl -fsS http://localhost:%WEB_PORT%/api/info'
+            }
+        }
+
+        stage('Push to Docker Hub') {
+            when { anyOf { branch 'main'; branch 'dev' } }
+            steps {
+                // логин и токен Docker Hub хранятся в Jenkins (Credentials, ID «dockerhub»),
+                // в журнал сборки они не попадают — Jenkins заменяет их на ****
+                withCredentials([usernamePassword(credentialsId: 'dockerhub',
+                                                  usernameVariable: 'DH_USER',
+                                                  passwordVariable: 'DH_TOKEN')]) {
+                    bat '''
+                        echo %DH_TOKEN%| docker login -u %DH_USER% --password-stdin || exit /b 1
+                        docker tag library-api:%IMAGE_TAG% %DH_USER%/library-api:%IMAGE_TAG% || exit /b 1
+                        docker tag library-web:%IMAGE_TAG% %DH_USER%/library-web:%IMAGE_TAG% || exit /b 1
+                        docker push %DH_USER%/library-api:%IMAGE_TAG% || exit /b 1
+                        docker push %DH_USER%/library-web:%IMAGE_TAG% || exit /b 1
+                    '''
+                    script {
+                        // для main дополнительно обновляем тег latest — «последняя рабочая версия»
+                        if (env.BRANCH_NAME == 'main') {
+                            bat '''
+                                docker tag library-api:%IMAGE_TAG% %DH_USER%/library-api:latest || exit /b 1
+                                docker tag library-web:%IMAGE_TAG% %DH_USER%/library-web:latest || exit /b 1
+                                docker push %DH_USER%/library-api:latest || exit /b 1
+                                docker push %DH_USER%/library-web:latest || exit /b 1
+                            '''
+                        }
+                    }
+                    echo 'Образы library-api и library-web отправлены на Docker Hub'
+                }
+            }
+            post {
+                always {
+                    // выйти из Docker Hub, чтобы токен не оставался в настройках Docker на компьютере
+                    bat(returnStatus: true, script: 'docker logout')
+                }
             }
         }
     }
