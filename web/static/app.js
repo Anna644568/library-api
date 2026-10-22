@@ -102,8 +102,9 @@ function errorText(data) {
     return d.map((e) => `• ${(e.loc || []).filter((x) => x !== "body").join(".")}: ${e.msg}`).join("\n");
   }
   const text = typeof d === "string" ? d : JSON.stringify(d);
-  if (text.includes("FOREIGN KEY")) return "Ссылочная целостность: на запись ссылаются другие данные или указан несуществующий id\n(" + text + ")";
-  if (text.includes("UNIQUE")) return "Такое значение уже есть в базе — поле должно быть уникальным\n(" + text + ")";
+  const low = text.toLowerCase();
+  if (low.includes("foreign key")) return "Ссылочная целостность: на запись ссылаются другие данные или указан несуществующий id\n(" + text + ")";
+  if (low.includes("unique") || low.includes("duplicate key")) return "Такое значение уже есть в базе — поле должно быть уникальным\n(" + text + ")";
   return text;
 }
 
@@ -268,27 +269,42 @@ async function findById(ev) {
 }
 
 // ---------- информация о развёрнутой сборке ----------
+const SERVICES = ["catalog", "readers", "loans"];
+
 async function loadInfo() {
   const foot = $("foot");
-  try {
-    const res = await fetch(API + "/info");
-    const i = await res.json();
-    foot.replaceChildren();
-    const env = document.createElement("span");
-    env.className = "badge " + i.environment;
-    env.textContent = i.environment;
-    const parts = [["Версия", i.version], ["Сборка Jenkins", "#" + i.build], ["Коммит", i.commit]];
-    foot.append(env);
-    for (const [k, v] of parts) {
-      const s = document.createElement("span");
-      s.append(k + ": ");
-      const b = document.createElement("b");
-      b.textContent = v;
-      s.append(b);
-      foot.append(s);
+  const pods = $("pods");
+  // каждый запрос nginx отправляет в Service, а тот — в один из подов (реплик) сервиса
+  const infos = await Promise.all(SERVICES.map(async (svc) => {
+    try {
+      const res = await fetch(`${API}/svc/${svc}/info`, { cache: "no-store" });
+      return res.ok ? await res.json() : { service: svc, pod: `ошибка ${res.status}` };
+    } catch {
+      return { service: svc, pod: "недоступен" };
     }
-  } catch {
-    foot.textContent = "API недоступно";
+  }));
+  const main = infos.find((i) => i.version) || {};
+  foot.replaceChildren();
+  const env = document.createElement("span");
+  env.className = "badge " + (main.environment || "");
+  env.textContent = main.environment || "нет связи с API";
+  foot.append(env);
+  const parts = [["Версия", main.version], ["Сборка Jenkins", main.build ? "#" + main.build : "—"],
+                 ["Коммит", main.commit], ["База данных", main.database]];
+  for (const [k, v] of parts) {
+    const s = document.createElement("span");
+    s.append(k + ": ");
+    const b = document.createElement("b");
+    b.textContent = v ?? "—";
+    s.append(b);
+    foot.append(s);
+  }
+  pods.replaceChildren();
+  for (const i of infos) {
+    const s = document.createElement("span");
+    s.className = "pod";
+    s.textContent = i.pod || i.service;
+    pods.append(s);
   }
 }
 
@@ -302,6 +318,7 @@ $("form").addEventListener("submit", submitForm);
 $("cancel").onclick = () => renderForm(null);
 $("find").addEventListener("submit", findById);
 $("refresh").onclick = () => renderTable();
+$("pods-refresh").onclick = () => loadInfo();
 
 const fromHash = location.hash.slice(1);
 if (ENTITIES[fromHash]) state.entity = fromHash;

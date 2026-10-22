@@ -29,7 +29,7 @@ h2 { font-size: 1.05rem; }
 }
 .brand h1 { font-size: 1.5rem; letter-spacing: .01em; }
 .sub { margin: 2px 0 0; color: var(--muted); font-size: .9rem; }
-.docs { color: var(--accent); font-weight: 600; text-decoration: none; border: 1px solid var(--accent); padding: 8px 12px; border-radius: 8px; }
+.docs { color: var(--accent); font-weight: 600; text-decoration: none; border: 1px solid var(--accent); padding: 6px 10px; border-radius: 8px; }
 .docs:hover { background: var(--accent); color: var(--accent-ink); }
 
 .tabs { max-width: 1200px; margin: 0 auto 16px; display: flex; gap: 6px; flex-wrap: wrap; border-bottom: 2px solid var(--line); }
@@ -82,7 +82,10 @@ td.actions button + button { margin-left: 6px; }
 .status.warn .code { color: var(--warn); }
 .status.err .code { color: var(--err); }
 
-.foot { max-width: 1200px; margin: 16px auto 0; color: var(--muted); font-size: .85rem; display: flex; gap: 8px 18px; flex-wrap: wrap; }
+.foot { max-width: 1200px; margin: 16px auto 0; color: var(--muted); font-size: .85rem; display: grid; gap: 8px; }
+.foot-row { display: flex; gap: 8px 18px; flex-wrap: wrap; align-items: center; }
+.pod { font-family: Consolas, "Courier New", monospace; background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; color: var(--ink); }
+.docs-links { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--muted); font-size: .9rem; }
 .foot b { color: var(--ink); }
 .badge { padding: 1px 8px; border-radius: 99px; font-weight: 700; font-size: .8rem; color: #fff; background: var(--muted); }
 .badge.production { background: var(--ok); }

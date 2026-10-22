@@ -1,86 +1,75 @@
-# Библиотека — микросервисное приложение в Docker
+# Библиотека — микросервисы в Kubernetes
 
 Учебный проект для лабораторных работ по CI/CD:
-ЛР1 «Методология CI/CD» (Jenkins) и ЛР2 «Технология контейнеризации. Микросервисная архитектура».
 
-## Архитектура
+| Работа | Тема | Код |
+|--------|------|-----|
+| ЛР1 | Методология CI/CD (Jenkins) | метка [`lr1`](../../tree/lr1) |
+| ЛР2 | Контейнеризация (Docker, nginx, Docker Hub) | метка [`lr2`](../../tree/lr2) |
+| ЛР3 | Микросервисы, развёртывание в кластере Kubernetes | ветка `main` |
+
+Посмотреть код прошлой работы: на GitHub — переключатель веток → вкладка **Tags** → `lr2`;
+в командной строке — `git checkout lr2` (вернуться: `git checkout main`).
+
+## Архитектура (ЛР3)
 
 ```
-браузер ──► web (nginx :80) ──/api/──► api (FastAPI :8000) ──► том library-data (SQLite)
-              │                               │
-              └──────── Docker-сеть backend ──┘
+браузер ──► Service web (NodePort 30080) ──► web ×2 (nginx: сайт + шлюз)
+                                               │
+              ┌────────────────────────────────┼─────────────────────────────┐
+              ▼                                ▼                             ▼
+     Service catalog                  Service readers                 Service loans
+     catalog ×2 (авторы,              readers ×2 (читатели)           loans ×2 (выдачи) ──HTTP──► catalog, readers
+     жанры, книги)                          │                               │
+              └──────────────► PostgreSQL (StatefulSet, том 1 ГБ): базы catalog / readers / loans
 ```
 
-| Сервис | Образ | Что делает |
-|--------|-------|------------|
-| `web`  | `library-web` (nginx 1.27) | веб-сервер: отдаёт веб-интерфейс и проксирует `/api/` в сервис `api` |
-| `api`  | `library-api` (Python 3.11) | REST API: 5 сущностей × 5 операций = **25 CRUD-операций** |
-| том `library-data` | — | файл базы данных SQLite, сохраняется при пересоздании контейнеров |
+| Микросервис | Данные | CRUD | Своя база |
+|-------------|--------|------|-----------|
+| `catalog` | авторы, жанры, книги | 15 | `catalog` |
+| `readers` | читатели | 5 | `readers` |
+| `loans`   | выдачи (проверяет книгу и читателя запросами к `catalog` и `readers`) | 5 | `loans` |
 
-Наружу открыт только порт nginx; сервис `api` доступен лишь внутри сети `backend`.
+Всего 25 CRUD-операций. Веб-интерфейс и пути API не изменились (`/api/authors`, `/api/loans`, …).
+Документация: `/api/svc/catalog/docs`, `/api/svc/readers/docs`, `/api/svc/loans/docs`.
 
-| Сущность  | Эндпоинты (через nginx — с префиксом `/api`) |
-|-----------|-----------|
-| Авторы    | `POST /authors`, `GET /authors`, `GET /authors/{id}`, `PUT /authors/{id}`, `DELETE /authors/{id}` |
-| Жанры     | `POST /genres`, `GET /genres`, `GET /genres/{id}`, `PUT /genres/{id}`, `DELETE /genres/{id}` |
-| Книги     | `POST /books`, `GET /books`, `GET /books/{id}`, `PUT /books/{id}`, `DELETE /books/{id}` |
-| Читатели  | `POST /readers`, `GET /readers`, `GET /readers/{id}`, `PUT /readers/{id}`, `DELETE /readers/{id}` |
-| Выдачи    | `POST /loans`, `GET /loans`, `GET /loans/{id}`, `PUT /loans/{id}`, `DELETE /loans/{id}` |
+## Структура
 
-Служебные: `GET /health`, `GET /info` (версия, окружение, номер сборки Jenkins, коммит).
+```
+services/common/libcommon   общая библиотека: БД (PostgreSQL/SQLite), CRUD, служебные эндпоинты
+services/catalog|readers|loans   код, тесты и Dockerfile каждого микросервиса
+services/e2e/smoke.py       сквозной тест развёрнутого приложения
+web/                        nginx: веб-интерфейс и шлюз (API Gateway)
+k8s/                        манифесты Kubernetes
+docker-compose.yml          локальный запуск без Kubernetes
+Jenkinsfile                 конвейер CI/CD
+```
 
-## Запуск в Docker
+## Kubernetes (Docker Desktop, кластер из одной ноды)
 
 ```bat
-docker compose up -d --build
+kubectl apply -f k8s/
+kubectl -n library get pods -o wide
 ```
 
-- веб-интерфейс: http://localhost:8081
-- Swagger: http://localhost:8081/api/docs
+Приложение: http://localhost:30080
 
-Остановить: `docker compose down` (данные останутся в томе), удалить вместе с данными: `docker compose down -v`.
-
-## Запуск без Docker
+Самовосстановление:
 
 ```bat
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements-dev.txt
-uvicorn app.main:app --reload
+kubectl -n library delete pod <имя-пода-catalog>        :: ReplicaSet создаст новый под
+curl -X POST http://localhost:30080/api/svc/catalog/chaos/crash   :: kubelet перезапустит контейнер
+kubectl -n library get pods -w
 ```
 
 ## Тесты
 
 ```bat
-python -m pytest -v                                   :: модульные тесты (42)
-docker build --target test -t library-api-test .      :: тестовый образ
-docker run --rm library-api-test                      :: те же тесты в контейнере
-python e2e/smoke.py http://localhost:8081             :: smoke-тест развёрнутого приложения
+cd services\catalog && python -m pytest -v      :: так же для readers и loans
 ```
-
-## Ветки
-
-- `main` — стабильная версия, разворачивается в окружение **production** (http://localhost:8081)
-- `dev` — ветка разработки, разворачивается в окружение **staging** (http://localhost:8082)
-- `feature/*` — новые функции: только тесты и сборка образов, вливаются в `dev`
 
 ## CI/CD (Jenkinsfile)
 
-Checkout → Docker info → Build test image → Unit tests → Build images → Deploy → Smoke test → Push to Docker Hub
-(Deploy, Smoke test и Push to Docker Hub — только для `main` и `dev`).
-
-## Docker Hub
-
-Проверенные образы Jenkins отправляет в Docker Hub:
-
-- `<логин>/library-api`, `<логин>/library-web` с тегами `dev-<сборка>`, `main-<сборка>` и `latest` (последний релиз из `main`).
-
-Логин и токен доступа хранятся в Jenkins: *Настроить Jenkins → Credentials → (global) → Add Credentials*,
-тип *Username with password*, ID `docker-hub-credentials`.
-
-Запуск опубликованной версии на любом компьютере с Docker:
-
-```bat
-docker pull <логин>/library-api:latest
-docker pull <логин>/library-web:latest
-```
+Checkout → Tools → Unit tests (3 сервиса) → Build images (4 образа) → Push to Docker Hub →
+Deploy to Kubernetes → Smoke test (при ошибке — `kubectl rollout undo`) → Publish latest.
+Развёртывание — только из `main`; `dev` — тесты, образы и Docker Hub; `feature/*` — только CI.
