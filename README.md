@@ -76,7 +76,7 @@ Checkout → Docker info → Build test image → Unit tests → Build images �
 - `<логин>/library-api`, `<логин>/library-web` с тегами `dev-<сборка>`, `main-<сборка>` и `latest` (последний релиз из `main`).
 
 Логин и токен доступа хранятся в Jenkins: *Настроить Jenkins → Credentials → (global) → Add Credentials*,
-тип *Username with password*, ID `dockerhub`.
+тип *Username with password*, ID `docker-hub-credentials`.
 
 Запуск опубликованной версии на любом компьютере с Docker:
 

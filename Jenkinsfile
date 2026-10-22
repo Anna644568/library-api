@@ -116,9 +116,9 @@ pipeline {
         stage('Push to Docker Hub') {
             when { anyOf { branch 'main'; branch 'dev' } }
             steps {
-                // логин и токен Docker Hub хранятся в Jenkins (Credentials, ID «dockerhub»),
+                // логин и токен Docker Hub хранятся в Jenkins (Credentials, ID «docker-hub-credentials»),
                 // в журнал сборки они не попадают — Jenkins заменяет их на ****
-                withCredentials([usernamePassword(credentialsId: 'dockerhub',
+                withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials',
                                                   usernameVariable: 'DH_USER',
                                                   passwordVariable: 'DH_TOKEN')]) {
                     bat '''
