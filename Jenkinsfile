@@ -9,9 +9,6 @@
 //
 // Код ЛР1 и ЛР2 сохранён в метках (tags) lr1 и lr2 репозитория.
 
-SERVICES = ['catalog', 'readers', 'loans']
-DEPLOYMENTS = ['catalog', 'readers', 'loans', 'web']
-
 pipeline {
     agent any
 
@@ -63,7 +60,7 @@ pipeline {
             steps {
                 script {
                     // каждый микросервис тестируется отдельно, в своём тестовом образе
-                    for (s in SERVICES) {
+                    for (s in ['catalog', 'readers', 'loans']) {
                         bat "docker build --load --target test -t library-${s}-test:%IMAGE_TAG% -f services\\${s}\\Dockerfile services"
                         bat """
                             docker rm -f lib-test-${s} >nul 2>&1
@@ -82,7 +79,7 @@ pipeline {
         stage('Build images') {
             steps {
                 script {
-                    for (s in SERVICES) {
+                    for (s in ['catalog', 'readers', 'loans']) {
                         bat "docker build --load --target runtime -t %DOCKERHUB_USER%/library-${s}:%IMAGE_TAG% -f services\\${s}\\Dockerfile services"
                     }
                 }
@@ -100,7 +97,7 @@ pipeline {
                                                   passwordVariable: 'DH_TOKEN')]) {
                     bat 'echo %DH_TOKEN%| docker login -u %DH_USER% --password-stdin'
                     script {
-                        for (s in DEPLOYMENTS) {
+                        for (s in ['catalog', 'readers', 'loans', 'web']) {
                             bat "docker push %DOCKERHUB_USER%/library-${s}:%IMAGE_TAG%"
                         }
                     }
@@ -129,7 +126,7 @@ pipeline {
                 bat 'kubectl apply -f k8s-rendered.yaml'
                 bat 'kubectl -n %K8S_NAMESPACE% rollout status statefulset/postgres --timeout=180s'
                 script {
-                    for (d in DEPLOYMENTS) {
+                    for (d in ['catalog', 'readers', 'loans', 'web']) {
                         bat "kubectl -n %K8S_NAMESPACE% rollout status deployment/${d} --timeout=240s"
                     }
                 }
@@ -149,7 +146,7 @@ pipeline {
                 failure {
                     // новая версия не работает — возвращаем предыдущую
                     script {
-                        for (d in DEPLOYMENTS) {
+                        for (d in ['catalog', 'readers', 'loans', 'web']) {
                             bat(returnStatus: true, script: "kubectl -n %K8S_NAMESPACE% rollout undo deployment/${d}")
                         }
                     }
@@ -166,7 +163,7 @@ pipeline {
                                                   passwordVariable: 'DH_TOKEN')]) {
                     bat 'echo %DH_TOKEN%| docker login -u %DH_USER% --password-stdin'
                     script {
-                        for (s in DEPLOYMENTS) {
+                        for (s in ['catalog', 'readers', 'loans', 'web']) {
                             bat "docker tag %DOCKERHUB_USER%/library-${s}:%IMAGE_TAG% %DOCKERHUB_USER%/library-${s}:latest"
                             bat "docker push %DOCKERHUB_USER%/library-${s}:latest"
                         }
@@ -183,7 +180,7 @@ pipeline {
         always {
             junit allowEmptyResults: true, testResults: 'reports/*.xml'
             script {
-                for (s in SERVICES) {
+                for (s in ['catalog', 'readers', 'loans']) {
                     bat(returnStatus: true, script: "docker image rm library-${s}-test:%IMAGE_TAG% >nul 2>&1")
                 }
             }
