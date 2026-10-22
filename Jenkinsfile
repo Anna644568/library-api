@@ -1,17 +1,21 @@
-// Декларативный pipeline для проекта «Библиотека» (ЛР2: контейнеризация).
-// Jenkins работает на Windows, шаги выполняются через bat, Docker — Docker Desktop.
+// Декларативный pipeline проекта «Библиотека» (ЛР3: микросервисы в Kubernetes).
+// Jenkins работает на Windows, шаги — через bat/powershell, Docker и Kubernetes — Docker Desktop.
 //
-// Все ветки (CI):   сборка тестового образа -> автотесты в контейнере -> сборка образов api и web
-// dev  (staging):    + развёртывание контейнеров на http://localhost:8082, smoke-тест,
-//                      отправка образов на Docker Hub с тегом dev-<номер сборки>
-// main (production): + развёртывание контейнеров на http://localhost:8081, smoke-тест,
-//                      отправка образов на Docker Hub с тегами main-<номер сборки> и latest
+// Все ветки (CI):    тестовые образы трёх сервисов -> модульные тесты в контейнерах -> рабочие образы
+// dev  и main:       + отправка образов на Docker Hub с тегом <ветка>-<номер сборки>
+// main (CD):         + развёртывание в кластер Kubernetes (namespace library) -> ожидание готовности
+//                      -> smoke-тест через http://localhost:30080 -> тег latest на Docker Hub
+//                      (если smoke-тест не прошёл — автоматический откат: kubectl rollout undo)
+//
+// Код ЛР1 и ЛР2 сохранён в метках (tags) lr1 и lr2 репозитория.
+
+SERVICES = ['catalog', 'readers', 'loans']
+DEPLOYMENTS = ['catalog', 'readers', 'loans', 'web']
 
 pipeline {
     agent any
 
     triggers {
-        // запуск по событию push из GitHub (вебхук)
         githubPush()
     }
 
@@ -24,12 +28,16 @@ pipeline {
     environment {
         DOCKER_BUILDKIT = '1'
         // Docker Desktop установлен в профиль пользователя User, а служба Jenkins работает
-        // от системной учётной записи и не видит его настроек. Поэтому:
-        //  - добавляем папку с docker.exe в начало PATH;
-        //  - указываем отдельную папку настроек Docker для Jenkins (там config.json
-        //    с путём к плагинам docker compose и docker buildx)
+        // от системной учётной записи: явно указываем путь к docker.exe/kubectl.exe
+        // и отдельные каталоги настроек Docker и Kubernetes для Jenkins
         PATH = "C:\\Users\\User\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin;${env.PATH}"
         DOCKER_CONFIG = 'C:\\ProgramData\\Jenkins\\docker-config'
+        KUBECONFIG = 'C:\\ProgramData\\Jenkins\\kube\\config'
+        DOCKERHUB_USER = 'anna234567890'
+        K8S_NAMESPACE = 'library'
+        APP_URL = 'http://localhost:30080'
+        PYTHON = 'C:\\Users\\User\\miniconda3\\python.exe'
+        PYTHONIOENCODING = 'utf-8'
     }
 
     stages {
@@ -38,130 +46,153 @@ pipeline {
                 checkout scm
                 script {
                     env.SHORT_COMMIT = bat(returnStdout: true, script: '@git rev-parse --short HEAD').trim()
-                    // тег образов: <ветка>-<номер сборки>, например main-5, feature-docker-2
-                    env.IMAGE_TAG  = "${env.BRANCH_NAME.replace('/', '-')}-${env.BUILD_NUMBER}"
-                    env.APP_BUILD  = env.BUILD_NUMBER
-                    env.APP_COMMIT = env.SHORT_COMMIT
-                    // в какое окружение разворачивать
-                    if (env.BRANCH_NAME == 'main') {
-                        env.APP_ENV = 'production'; env.STACK = 'library-prod';    env.WEB_PORT = '8081'
-                    } else if (env.BRANCH_NAME == 'dev') {
-                        env.APP_ENV = 'staging';    env.STACK = 'library-staging'; env.WEB_PORT = '8082'
-                    } else {
-                        env.APP_ENV = 'none'
-                    }
+                    env.IMAGE_TAG = "${env.BRANCH_NAME.replace('/', '-')}-${env.BUILD_NUMBER}"
                 }
-                echo "Ветка ${env.BRANCH_NAME}, коммит ${env.SHORT_COMMIT}, тег образов ${env.IMAGE_TAG}, окружение ${env.APP_ENV}"
+                echo "Ветка ${env.BRANCH_NAME}, коммит ${env.SHORT_COMMIT}, тег образов ${env.IMAGE_TAG}"
             }
         }
 
-        stage('Docker info') {
+        stage('Tools') {
             steps {
-                bat 'docker version'
-                bat 'docker compose version'
-            }
-        }
-
-        stage('Build test image') {
-            steps {
-                // этап test из Dockerfile: код приложения + pytest + тесты;
-                // --load: готовый образ обязательно загружается в Docker (нужно, если
-                // сборщик BuildKit работает в отдельном контейнере)
-                bat 'docker build --load --target test -t library-api-test:%IMAGE_TAG% .'
+                bat 'docker version --format "Docker {{.Server.Version}}"'
+                bat 'kubectl version --client'
             }
         }
 
         stage('Unit tests') {
             steps {
-                // тесты выполняются ВНУТРИ контейнера; отчёт junit.xml копируется из контейнера в workspace
-                bat '''
-                    docker rm -f lib-test-%IMAGE_TAG% >nul 2>&1
-                    docker run --name lib-test-%IMAGE_TAG% library-api-test:%IMAGE_TAG%
-                    set RC=%ERRORLEVEL%
-                    if not exist reports mkdir reports
-                    docker cp lib-test-%IMAGE_TAG%:/app/reports/junit.xml reports\\junit.xml
-                    docker rm lib-test-%IMAGE_TAG% >nul
-                    exit /b %RC%
-                '''
+                script {
+                    // каждый микросервис тестируется отдельно, в своём тестовом образе
+                    for (s in SERVICES) {
+                        bat "docker build --load --target test -t library-${s}-test:%IMAGE_TAG% -f services\\${s}\\Dockerfile services"
+                        bat """
+                            docker rm -f lib-test-${s} >nul 2>&1
+                            docker run --name lib-test-${s} library-${s}-test:%IMAGE_TAG%
+                            set RC=%ERRORLEVEL%
+                            if not exist reports mkdir reports
+                            docker cp lib-test-${s}:/app/reports/junit.xml reports\\${s}.xml
+                            docker rm lib-test-${s} >nul
+                            exit /b %RC%
+                        """
+                    }
+                }
             }
         }
 
         stage('Build images') {
             steps {
-                // образы library-api:<тег> и library-web:<тег> по описанию из docker-compose.yml
-                bat 'docker compose build'
-                bat 'docker image ls --filter "reference=library-*"'
-            }
-        }
-
-        stage('Deploy') {
-            when { anyOf { branch 'main'; branch 'dev' } }
-            steps {
-                // пересоздаются только контейнеры, том library-data с базой сохраняется
-                bat 'docker compose -p %STACK% up -d --no-build --remove-orphans --wait --wait-timeout 120'
-                bat 'docker compose -p %STACK% ps'
-            }
-        }
-
-        stage('Smoke test') {
-            when { anyOf { branch 'main'; branch 'dev' } }
-            steps {
-                // 1) изнутри Docker-сети: тестовый контейнер -> nginx -> api -> БД
-                bat 'docker run --rm --network %STACK%_backend library-api-test:%IMAGE_TAG% python e2e/smoke.py http://web'
-                // 2) снаружи, как пользователь: через опубликованный порт
-                bat 'curl -fsS http://localhost:%WEB_PORT%/api/info'
+                script {
+                    for (s in SERVICES) {
+                        bat "docker build --load --target runtime -t %DOCKERHUB_USER%/library-${s}:%IMAGE_TAG% -f services\\${s}\\Dockerfile services"
+                    }
+                }
+                bat 'docker build --load -t %DOCKERHUB_USER%/library-web:%IMAGE_TAG% web'
+                bat 'docker image ls --filter "reference=%DOCKERHUB_USER%/library-*:%IMAGE_TAG%"'
             }
         }
 
         stage('Push to Docker Hub') {
             when { anyOf { branch 'main'; branch 'dev' } }
             steps {
-                // логин и токен Docker Hub хранятся в Jenkins (Credentials, ID «docker-hub-credentials»),
-                // в журнал сборки они не попадают — Jenkins заменяет их на ****
+                // логин и токен Docker Hub — в Jenkins Credentials (ID docker-hub-credentials)
                 withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials',
                                                   usernameVariable: 'DH_USER',
                                                   passwordVariable: 'DH_TOKEN')]) {
-                    bat '''
-                        echo %DH_TOKEN%| docker login -u %DH_USER% --password-stdin || exit /b 1
-                        docker tag library-api:%IMAGE_TAG% %DH_USER%/library-api:%IMAGE_TAG% || exit /b 1
-                        docker tag library-web:%IMAGE_TAG% %DH_USER%/library-web:%IMAGE_TAG% || exit /b 1
-                        docker push %DH_USER%/library-api:%IMAGE_TAG% || exit /b 1
-                        docker push %DH_USER%/library-web:%IMAGE_TAG% || exit /b 1
-                    '''
+                    bat 'echo %DH_TOKEN%| docker login -u %DH_USER% --password-stdin'
                     script {
-                        // для main дополнительно обновляем тег latest — «последняя рабочая версия»
-                        if (env.BRANCH_NAME == 'main') {
-                            bat '''
-                                docker tag library-api:%IMAGE_TAG% %DH_USER%/library-api:latest || exit /b 1
-                                docker tag library-web:%IMAGE_TAG% %DH_USER%/library-web:latest || exit /b 1
-                                docker push %DH_USER%/library-api:latest || exit /b 1
-                                docker push %DH_USER%/library-web:latest || exit /b 1
-                            '''
+                        for (s in DEPLOYMENTS) {
+                            bat "docker push %DOCKERHUB_USER%/library-${s}:%IMAGE_TAG%"
                         }
                     }
-                    echo 'Образы library-api и library-web отправлены на Docker Hub'
                 }
             }
             post {
-                always {
-                    // выйти из Docker Hub, чтобы токен не оставался в настройках Docker на компьютере
-                    bat(returnStatus: true, script: 'docker logout')
+                always { bat(returnStatus: true, script: 'docker logout') }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            when { branch 'main' }
+            steps {
+                bat 'kubectl get nodes -o wide'
+                // в манифестах k8s/ тег :latest заменяется на тег этой сборки,
+                // подставляются номер сборки и коммит
+                powershell '''
+                    $files = Get-ChildItem k8s -Filter *.yaml | Sort-Object Name
+                    $text = ($files | ForEach-Object { [IO.File]::ReadAllText($_.FullName) }) -join "`n---`n"
+                    $text = $text.Replace(':latest', ":$env:IMAGE_TAG")
+                    $text = $text.Replace('APP_BUILD: "local"', "APP_BUILD: `"$env:BUILD_NUMBER`"")
+                    $text = $text.Replace('APP_COMMIT: "local"', "APP_COMMIT: `"$env:SHORT_COMMIT`"")
+                    [IO.File]::WriteAllText((Join-Path $env:WORKSPACE 'k8s-rendered.yaml'), $text)
+                    Write-Host "Подготовлены манифесты: $($files.Name -join ', ')"
+                '''
+                bat 'kubectl apply -f k8s-rendered.yaml'
+                bat 'kubectl -n %K8S_NAMESPACE% rollout status statefulset/postgres --timeout=180s'
+                script {
+                    for (d in DEPLOYMENTS) {
+                        bat "kubectl -n %K8S_NAMESPACE% rollout status deployment/${d} --timeout=240s"
+                    }
                 }
+                bat 'kubectl -n %K8S_NAMESPACE% get deployments,replicasets,pods,services -o wide'
+            }
+        }
+
+        stage('Smoke test') {
+            when { branch 'main' }
+            steps {
+                // проверка «как пользователь»: запросы с компьютера на NodePort кластера
+                // (скрипт использует только стандартную библиотеку Python)
+                bat '"%PYTHON%" services\\e2e\\smoke.py %APP_URL%'
+                bat 'curl -fsS %APP_URL%/api/svc/catalog/info'
+            }
+            post {
+                failure {
+                    // новая версия не работает — возвращаем предыдущую
+                    script {
+                        for (d in DEPLOYMENTS) {
+                            bat(returnStatus: true, script: "kubectl -n %K8S_NAMESPACE% rollout undo deployment/${d}")
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Publish latest') {
+            when { branch 'main' }
+            steps {
+                // тег latest получает только версия, прошедшая smoke-тест в кластере
+                withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials',
+                                                  usernameVariable: 'DH_USER',
+                                                  passwordVariable: 'DH_TOKEN')]) {
+                    bat 'echo %DH_TOKEN%| docker login -u %DH_USER% --password-stdin'
+                    script {
+                        for (s in DEPLOYMENTS) {
+                            bat "docker tag %DOCKERHUB_USER%/library-${s}:%IMAGE_TAG% %DOCKERHUB_USER%/library-${s}:latest"
+                            bat "docker push %DOCKERHUB_USER%/library-${s}:latest"
+                        }
+                    }
+                }
+            }
+            post {
+                always { bat(returnStatus: true, script: 'docker logout') }
             }
         }
     }
 
     post {
         always {
-            junit allowEmptyResults: true, testResults: 'reports/junit.xml'
-            // тестовый образ больше не нужен; удаляем и «висячие» слои старых сборок
-            bat(returnStatus: true, script: 'docker image rm library-api-test:%IMAGE_TAG% >nul 2>&1')
+            junit allowEmptyResults: true, testResults: 'reports/*.xml'
+            script {
+                for (s in SERVICES) {
+                    bat(returnStatus: true, script: "docker image rm library-${s}-test:%IMAGE_TAG% >nul 2>&1")
+                }
+            }
             bat(returnStatus: true, script: 'docker image prune -f')
         }
         success {
             script {
-                if (env.APP_ENV != 'none') {
-                    echo "Сборка ${env.BRANCH_NAME} #${env.BUILD_NUMBER} развёрнута (${env.APP_ENV}): http://localhost:${env.WEB_PORT}"
+                if (env.BRANCH_NAME == 'main') {
+                    echo "Сборка main #${env.BUILD_NUMBER} развёрнута в Kubernetes: ${env.APP_URL}"
                 } else {
                     echo "Сборка ${env.BRANCH_NAME} #${env.BUILD_NUMBER}: тесты пройдены, образы собраны"
                 }
